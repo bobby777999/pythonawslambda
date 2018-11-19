@@ -1,0 +1,70 @@
+
+import json
+import datetime
+import dateutil
+import boto3
+from botocore.exceptions import ClientError
+
+def lambda_handler(event, context):
+    iam = boto3.client('iam')
+    AWS_REGION = "us-east-1"
+    expiry = datetime.datetime.now() - datetime.timedelta(days=90)
+    remind = datetime.datetime.now() - datetime.timedelta(days=80)
+    users = iam.list_users()
+    for user in users['Users']:
+        username = user['UserName']
+        email = username+"@example.com"
+        #print user
+        keys = iam.list_access_keys(UserName = username)
+        for key in keys['AccessKeyMetadata']:
+            #print key
+            if key['CreateDate'].date() <= expiry.date():
+                mail (email, "expired")
+                #print "This: "+key['AccessKeyId']
+                iam.delete_access_key(UserName = username, AccessKeyId = key['AccessKeyId'])
+            elif key['CreateDate'].date() <= remind.date():
+                #print "That: "+key['AccessKeyId']
+                mail (email, "reminder")
+    return {
+        "statusCode": 200
+    }
+
+def mail (to, message):
+    ses = boto3.client('ses')
+
+    if message=="expired":
+    	text = "Your IAM access keys are 90 days or older and have been deleted. Login to the AWS console and create a new access key pair."
+    elif message=="reminder":
+    	text = "Your IAM access keys are 80 days old, they will be deleted automatically if not renewed within 10 days."
+
+    try:
+        response = ses.send_email(
+            Destination={
+                'ToAddresses': [
+                    to,
+                ],
+            },
+            Message={
+                'Body': {
+                    'Html': {
+                        'Charset': "UTF-8",
+                        'Data': "<body>"+text+"</body>",
+                    },
+                    'Text': {
+                        'Charset': "UTF-8",
+                        'Data': text,
+                    },
+                },
+                'Subject': {
+                    'Charset': "UTF-8",
+                    'Data': "Notification Regarding Your IAM Access Keys",
+                },
+            },
+            Source="system@example.com"
+        )
+
+    except ClientError as e:
+        print(e.response['Error']['Message'])
+    else:
+        print("Email sent! Message ID:"),
+        print(response['MessageId'])
